@@ -1,92 +1,122 @@
 App = {
   web3Provider: null,
   contracts: {},
-  account: '0x0',
 
-  init: function(wahlLeiter) {
-    App.Account = wahlLeiter; 
-    return App.initWeb3();
+  init: async function() {
+    // Load pets.
+    $.getJSON('../pets.json', function(data) {
+      var petsRow = $('#petsRow');
+      var petTemplate = $('#petTemplate');
+
+      for (i = 0; i < data.length; i ++) {
+        petTemplate.find('.panel-title').text(data[i].name);
+        petTemplate.find('img').attr('src', data[i].picture);
+        petTemplate.find('.pet-art').text(data[i].art);
+        petTemplate.find('.pet-amount').text(data[i].amount);
+        petTemplate.find('.pet-location').text(data[i].location);
+        petTemplate.find('.btn-adopt').attr('data-id', data[i].id);
+
+        petsRow.append(petTemplate.html());
+      }
+    });
+
+    return await App.initWeb3();
   },
 
-  initWeb3: function() {
-    if (typeof web3 !== 'undefined') {
-      // If a web3 instance is already provided by Meta Mask.
-      App.web3Provider = web3.currentProvider;
-      web3 = new Web3(web3.currentProvider);
-    } else {
-      // Specify default instance if no web3 instance provided
-      App.web3Provider = new Web3.providers.HttpProvider('http://localhost:7545');
-      web3 = new Web3(App.web3Provider);
+  initWeb3: async function() {
+    // Modern dapp browsers... 
+    if(window.ethereum) {
+      App.web3Provider = window.ethereum; 
+      try {
+        // Request account access
+        await window.ethereum.enable(); 
+      } catch (error) {
+        // User denied account access... 
+        console.error("User denied account access"); 
+      }
     }
-    return App.initContract(wahlLeiter);
+
+    // Legacy dapp Browsers...
+    else if (window.web3) {
+      App.web3Provider = window.web3.currentProvider; 
+    }
+    // If no injected web3 instance is detected, fall back to ganache
+    else {
+      App.web3Provider = new Web3.providers.HttpProvider('http://localhost:7545'); 
+    }
+    web3 = new Web3(App.web3Provider); 
+
+    return App.initContract();
   },
 
   initContract: function() {
-    $.getJSON("Election.json", function(election) {
-      // Instantiate a new truffle contract from the artifact
-      App.contracts.Election = TruffleContract(election);
-      // Connect provider to interact with contract
-      App.contracts.Election.setProvider(App.web3Provider);
+    $.getJSON('Adoption.json', function(data) {
+      // Get the ncessary contrct artifact file and instantiate it with truffle-contract
+      var AdoptionArtifact = data; 
+      App.contracts.Adoption = TruffleContract(AdoptionArtifact); 
 
-      return App.render();
-    });
+      // set the provider for our contract
+      App.contracts.Adoption.setProvider(App.web3Provider); 
+
+      // Use our contract to retrieve and mar the adopted pets
+      return App.markAdopted(); 
+    }); 
+
+    return App.bindEvents();
   },
 
-  render: function() {
-    var electionInstance;
-    var loader = $("#loader");
-    var content = $("#content");
-    var buttonGroup = $("#buttonGroup"); 
-    var masterButton = $("#masterButton"); 
-    var slaveButton = $("#slaveButton"); 
+  bindEvents: function() {
+    $(document).on('click', '.btn-adopt', App.handleAdopt);
+  },
 
+  markAdopted: function(adopters, account) {
+    var adoptionInstance; 
 
-    loader.show();
-    // button group muss hier später hiden! 
-    buttonGroup.show(); 
-    content.hide();
-
-    // Load account data
-    web3.eth.getCoinbase(function(err, account) {
-      if (err === null) {
-        $("#accountAddress").html("WahlleiterAdresse: " + account);
+    App.contracts.Adoption.deployed().then(function(instance) {
+      adoptionInstance = instance; 
+      return adoptionInstance.getAdopters.call(); 
+    }).then(function(adopters) {
+      for(i = 0; i < adopters.length; i++) {
+        if(adopters[i] !== '0x0000000000000000000000000000000000000000') {
+          $('.panel-pet').eq(i).find('button').text('Success').attr('disabled', true); 
+        }
       }
-    });
+    }).catch(function(err) {
+      console.log(err.message); 
+    }); 
+  },
 
-    // Load contract data
-    App.contracts.Election.deployed().then(function(instance) {
-      electionInstance = instance;
-      return electionInstance.candidatesCount();
-    }).then(function(candidatesCount) {
-      var candidatesResults = $("#candidatesResults");
-      candidatesResults.empty();
+  handleAdopt: function(event) {
+    event.preventDefault();
 
-      for (var i = 1; i <= candidatesCount; i++) {
-        electionInstance.candidates(i).then(function(candidate) {
-          var id = candidate[0];
-          var name = candidate[1];
-          var voteCount = candidate[2];
+    var petId = parseInt($(event.target).data('id'));
 
-          // Render candidate Result in tabelle
-          var candidateTemplate = "<tr><th>" + id + "</th><td>" + name + "</td><td>" + voteCount + "</td></tr>"
-          candidatesResults.append(candidateTemplate);
-        });
+    var adoptionInstance; 
+
+    web3.eth.getAccounts(function(error, accounts) {
+      if(error) {
+        console.log(error); 
       }
 
-      loader.hide();
-      // buttonGroup logik final nochmal prüfen
-      buttonGroup.show(); 
-      content.show();
-    }).catch(function(error) {
-      console.warn(error);
-    });
+      var account = accounts[0]; 
+
+      App.contracts.Adoption.deployed().then(function(instance) {
+        adoptionInstance = instance; 
+
+        // Execute adopt as a transaction by sending account
+        return adoptionInstance.adopt(petId, {from: account}); 
+      }).then(function(result) {
+        return App.markAdopted(); 
+      }).catch(function(err) {
+        console.log(err.message); 
+      }); 
+    }); 
   }
+
 };
 
 $(function() {
   $(window).load(function() {
-    // hier bei init die adresse vom wahlleiter übergeben 
-    // einfach als string? 
-    App.init("0xE25e13763E57BA5b6863355d8F076a4f1F7d09AB");
+    App.init();
   });
 });
