@@ -21,7 +21,7 @@ contract Tester{
 	}
 
 	function sendCurrency(address receiver, uint256 amount) public{
-		if(balance[msg.sender] >= amount){
+		if(balance[msg.sender] >= amount && amount%1==0){
 			balance[msg.sender] -= amount;
 			balance[receiver] += amount;
 		}
